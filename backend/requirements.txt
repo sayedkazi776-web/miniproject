@@ -1,0 +1,14 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+Flask-SocketIO==5.3.6
+PyJWT==2.8.0
+bcrypt==4.1.1
+pymongo==4.6.1
+opencv-python==4.9.0.80
+numpy==1.26.3
+ultralytics==8.1.0
+python-socketio==5.11.0
+python-dotenv==1.0.0
+Pillow==10.2.0
+eventlet==0.33.3
+
