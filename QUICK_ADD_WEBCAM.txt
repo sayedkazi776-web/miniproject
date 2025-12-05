@@ -1,0 +1,55 @@
+========================================
+QUICK START: Add Your Webcam
+========================================
+
+METHOD 1: Automated Script (Easiest!)
+--------------------------------------
+
+1. Start backend:
+   cd backend
+   python app.py
+
+2. In a NEW terminal, run:
+   python add_webcam.py
+
+3. Follow the prompts:
+   - Enter your email and password
+   - Enter camera name (or press Enter)
+   - Enter location (or press Enter)
+
+4. Done! Your webcam is added!
+
+
+METHOD 2: Web Interface
+------------------------
+
+1. Start backend:
+   cd backend
+   python app.py
+
+2. Open browser: http://localhost:5000
+
+3. Login to your account
+
+4. Go to Dashboard → Click "Add Camera"
+
+5. Fill in:
+   - Name: My Webcam
+   - URL: 0 (for first webcam)
+   - Location: Main Entrance
+
+6. Click "Add Camera"
+
+
+TROUBLESHOOTING
+---------------
+
+Webcam not found?
+- Try different index: 0, 1, 2, etc.
+- Check Windows Settings → Privacy → Camera
+- Close other apps using camera (Zoom, Teams, etc.)
+
+For complete guide, see: CCTV_CAMERA_GUIDE.md
+
+
+

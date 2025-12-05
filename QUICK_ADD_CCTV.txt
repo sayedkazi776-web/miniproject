@@ -1,0 +1,163 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║                  📹 QUICK GUIDE: ADD CCTV CAMERA                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Your system ALREADY supports CCTV cameras! Follow these simple steps:
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 1: FIND YOUR CAMERA'S RTSP URL
+──────────────────────────────────────────────────────────────────────────────
+
+You need to find your CCTV's RTSP stream URL. Common formats:
+
+  HIKVISION:
+    rtsp://admin:password@192.168.1.64:554/Streaming/Channels/101
+
+  DAHUA:
+    rtsp://admin:password@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
+
+  GENERIC:
+    rtsp://username:password@192.168.1.100:554/stream1
+
+Where to find it:
+  • Check camera manual or manufacturer website
+  • Access camera web interface: http://YOUR_CAMERA_IP
+  • Look for "RTSP Settings" or "Streaming" section
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 2: TEST YOUR RTSP URL
+──────────────────────────────────────────────────────────────────────────────
+
+IMPORTANT: Test the RTSP URL before adding!
+
+Option A - Using VLC Media Player (Easiest):
+  1. Download VLC: https://www.videolan.org/vlc/
+  2. Open VLC → Media → Open Network Stream
+  3. Paste your RTSP URL
+  4. Click Play
+  5. If video appears → ✅ URL is correct!
+
+Option B - Using Test Script:
+  1. Run: python test_cctv.py
+  2. Enter your RTSP URL when prompted
+  3. If video appears → ✅ URL is correct!
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 3: ADD CAMERA TO SYSTEM
+──────────────────────────────────────────────────────────────────────────────
+
+Method A - Web Interface (Recommended):
+
+  1. Start backend:
+     cd backend
+     python app.py
+
+  2. Open browser: http://localhost:5000
+
+  3. Login to your account
+
+  4. Click "Add Camera" button
+
+  5. Fill in:
+     Name:     Front Door CCTV
+     URL:      rtsp://admin:password@192.168.1.100:554/stream1
+     Location: Front Entrance
+
+  6. Click "Add Camera"
+
+  7. Done! ✅
+
+Method B - Using Script:
+
+  1. Edit add_camera.py:
+     CAMERA_NAME = "My CCTV"
+     CAMERA_URL = "rtsp://admin:password@192.168.1.100:554/stream1"
+     CAMERA_LOCATION = "Main Entrance"
+
+  2. Run: python add_camera.py
+
+  3. Enter email and password
+
+  4. Done! ✅
+
+──────────────────────────────────────────────────────────────────────────────
+STEP 4: START MONITORING
+──────────────────────────────────────────────────────────────────────────────
+
+  1. Go to Dashboard
+  2. Click on your CCTV camera card
+  3. Click "Start Stream"
+  4. Wait 5-10 seconds
+  5. Video should appear! 🎥
+
+──────────────────────────────────────────────────────────────────────────────
+TROUBLESHOOTING
+──────────────────────────────────────────────────────────────────────────────
+
+Problem: "Could not open video source"
+
+Solutions:
+  ✓ Test RTSP URL in VLC first (MUST WORK!)
+  ✓ Check username/password are correct
+  ✓ Verify camera IP address
+  ✓ Try different stream paths (stream1, stream2, etc.)
+  ✓ Check camera is powered on
+  ✓ Ping camera: ping 192.168.1.100
+
+Problem: Video freezes or disconnects
+
+Solutions:
+  ✓ Use lower resolution stream
+  ✓ Check network connection (use wired if possible)
+  ✓ Close other applications
+  ✓ Restart camera
+
+Problem: "Authentication failed"
+
+Solutions:
+  ✓ Double-check username and password
+  ✓ Try default credentials (admin/admin)
+  ✓ Reset camera if needed
+
+──────────────────────────────────────────────────────────────────────────────
+NEED MORE HELP?
+──────────────────────────────────────────────────────────────────────────────
+
+📖 See detailed guide: CCTV_CAMERA_SETUP.md
+📖 See camera setup: CAMERA_SETUP.md
+📖 See adding cameras: ADD_CAMERA_GUIDE.md
+
+──────────────────────────────────────────────────────────────────────────────
+SUPPORTED CAMERA BRANDS
+──────────────────────────────────────────────────────────────────────────────
+
+Works with ANY RTSP-compatible CCTV camera:
+
+  ✓ Hikvision, Dahua, Axis
+  ✓ Uniview, Hanwha, Bosch
+  ✓ Panasonic, Sony
+  ✓ Reolink, Foscam, TP-Link
+  ✓ Most generic IP cameras
+
+Does NOT work:
+  ✗ Proprietary protocols without RTSP
+  ✗ Cloud-only cameras without local RTSP
+
+──────────────────────────────────────────────────────────────────────────────
+TIPS FOR BEST RESULTS
+──────────────────────────────────────────────────────────────────────────────
+
+  • Always test RTSP URL in VLC before adding
+  • Use wired network instead of WiFi if possible
+  • Start with lower resolution streams
+  • Keep camera firmware updated
+  • Use stable network connection
+  • Monitor backend console for errors
+
+──────────────────────────────────────────────────────────────────────────────
+
+Happy Monitoring! 🎉📊
+
+═══════════════════════════════════════════════════════════════════════════
+
+

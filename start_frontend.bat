@@ -1,0 +1,9 @@
+@echo off
+echo ========================================
+echo Starting Frontend Server...
+echo ========================================
+cd frontend
+call npm install
+call npm run dev
+pause
+
