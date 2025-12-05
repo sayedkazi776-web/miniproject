@@ -12,7 +12,9 @@ export default defineConfig({
       },
       '/socket.io': {
         target: 'http://localhost:5000',
-        ws: true
+        ws: true,
+        changeOrigin: true, // Added this to fix socket connection
+        secure: false
       }
     }
   },
@@ -22,4 +24,3 @@ export default defineConfig({
     emptyOutDir: true
   }
 })
-

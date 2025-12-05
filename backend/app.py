@@ -1,6 +1,10 @@
 """
 Main Flask application for AI-based Crowd Density Monitoring System
 """
+# 1. ADD THESE LINES AT THE VERY TOP
+import eventlet
+eventlet.monkey_patch()
+
 import os
 from flask import Flask, send_from_directory, send_file
 from flask_cors import CORS
@@ -30,7 +34,7 @@ app.config['MONGODB_URI'] = os.getenv('MONGODB_URI', 'mongodb://127.0.0.1:27017/
 CORS(app, origins="*", supports_credentials=True)
 
 # Initialize SocketIO for real-time communication
-# Use 'threading' mode if eventlet has compatibility issues (e.g., Python 3.12)
+# Using eventlet is recommended for production performance
 try:
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 except Exception as e:
@@ -136,5 +140,5 @@ if __name__ == '__main__':
     
     print()
     
+    # use socketio.run instead of app.run
     socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True)
-

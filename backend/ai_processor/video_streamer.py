@@ -3,7 +3,6 @@ Real-time video streaming with AI processing
 """
 import cv2
 import base64
-import threading
 import time
 import sys
 import os
@@ -33,6 +32,7 @@ class VideoStreamer:
         self.socketio = socketio
         self.density_threshold = density_threshold
         self.active_streams = {}  # {camera_id: stream_thread}
+        self.stream_signals = {}  # {camera_id: boolean} - True to keep running
         self.yolo_detector = None
         self.density_detector = DensityDetector()
         
@@ -73,15 +73,13 @@ class VideoStreamer:
                 print(f"Received start_stream request for camera: {camera_id}")
                 
                 if not camera_id:
-                    error_msg = {'message': 'Camera ID required', 'camera_id': None}
-                    print(f"✗ {error_msg['message']}")
-                    self.socketio.emit('error', error_msg)
+                    self.socketio.emit('error', {'message': 'Camera ID required'})
                     return
                 
                 if camera_id in self.active_streams:
-                    error_msg = {'message': 'Stream already active', 'camera_id': camera_id}
-                    print(f"✗ {error_msg['message']}")
-                    self.socketio.emit('error', error_msg)
+                    # Stream already running, just update threshold? 
+                    # For now we can ignore or restart. Let's restart logic safely.
+                    print(f"Stream already active for camera {camera_id}")
                     return
                 
                 print(f"✓ Starting stream for camera: {camera_id}")
@@ -102,9 +100,8 @@ class VideoStreamer:
         if threshold is None:
             threshold = self.density_threshold
         
-        if camera_id in self.active_streams:
-            print(f"Stream already active for camera {camera_id}")
-            return
+        # Set running signal
+        self.stream_signals[camera_id] = True
         
         # Get camera info
         camera = Camera.find_by_id(camera_id)
@@ -115,23 +112,29 @@ class VideoStreamer:
         camera_url = camera["url"]
         is_file_source = self._is_video_file_source(camera_url)
 
-        # Create and start stream thread
-        stream_thread = threading.Thread(
+        # Use socketio.start_background_task instead of threading.Thread
+        # This is CRITICAL for working with eventlet/gevent
+        stream_task = self.socketio.start_background_task(
             target=self._stream_worker,
-            args=(camera_id, camera_url, threshold, is_file_source),
-            daemon=True,
+            camera_id=camera_id,
+            camera_url=camera_url,
+            threshold=threshold,
+            is_file_source=is_file_source
         )
-        stream_thread.start()
-        self.active_streams[camera_id] = stream_thread
         
-        print(f"Started stream for camera {camera_id}")
+        self.active_streams[camera_id] = stream_task
+        print(f"Started stream task for camera {camera_id}")
     
     def stop_stream(self, camera_id):
         """Stop streaming a camera"""
-        if camera_id in self.active_streams:
-            # Mark stream as stopped (the worker checks this)
-            self.active_streams[camera_id] = None
-            del self.active_streams[camera_id]
+        if camera_id in self.stream_signals:
+            # Signal the worker loop to stop
+            self.stream_signals[camera_id] = False
+            
+            # Clean up references
+            if camera_id in self.active_streams:
+                del self.active_streams[camera_id]
+            
             print(f"Stopped stream for camera {camera_id}")
     
     def _is_video_file_source(self, camera_url: str) -> bool:
@@ -149,23 +152,15 @@ class VideoStreamer:
         return url.lower().endswith(video_exts)
 
     def _resolve_video_file_path(self, camera_url: str) -> str:
-        """
-        Resolve a camera URL into an absolute path for a local video file.
-
-        - Absolute paths are used as-is.
-        - Relative names/paths are looked up in the project-level "videos" folder.
-        """
+        """Resolve a camera URL into an absolute path for a local video file."""
         url = camera_url.strip()
-        # Absolute path (e.g. C:\\videos\\clip.mp4 or /home/user/clip.mp4)
         if os.path.isabs(url):
             return url
-        # Otherwise, treat as relative to PROJECT_ROOT/videos
         return os.path.join(VIDEO_DIR, url)
 
     def _stream_worker(self, camera_id, camera_url, threshold, is_file_source=False):
         """Worker thread for video streaming (camera or video file)"""
         cap = None
-        frame_count = 0
         last_log_time = time.time()
         log_interval = 5.0  # Log every 5 seconds
         
@@ -173,236 +168,128 @@ class VideoStreamer:
             print(f"Attempting to open video source: {camera_url}")
 
             # Validate and open video source
-            cap = None
             if is_file_source:
-                # Treat as local video file
                 video_path = self._resolve_video_file_path(camera_url)
-                print(f"Opening local video file: {video_path}")
                 if not os.path.exists(video_path):
-                    error_msg = f'Video file not found: {video_path}'
-                    print(f"✗ {error_msg}")
-                    try:
-                        self.socketio.emit(
-                            "error",
-                            {
-                                "camera_id": camera_id,
-                                "message": error_msg,
-                            },
-                        )
-                    except Exception:
-                        pass
+                    self.socketio.emit("error", {"camera_id": camera_id, "message": f"File not found: {video_path}"})
                     return
                 cap = cv2.VideoCapture(video_path)
             elif camera_url and camera_url.strip().isdigit():
-                # Webcam index (must be numeric string like "0", "1", "2")
+                # Webcam
                 camera_index = int(camera_url.strip())
-                print(f"Opening webcam with index: {camera_index}")
                 cap = cv2.VideoCapture(camera_index)
-                # Set buffer size to 1 to reduce latency
                 if cap.isOpened():
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            elif camera_url and (
-                camera_url.startswith("http")
-                or camera_url.startswith("rtsp")
-                or camera_url.startswith("/")
-            ):
-                # RTSP URL or file path
-                print(f"Opening video source URL: {camera_url}")
-                cap = cv2.VideoCapture(camera_url)
-                # For RTSP, try to use TCP transport if available (more reliable)
-                if camera_url.startswith("rtsp") and cap.isOpened():
-                    # Try setting buffer properties for better RTSP performance
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    # Some RTSP cameras work better with specific backends
-                    # FFmpeg backend often handles RTSP better than default
-                    # This is a soft setting that won't break if not supported
-                    try:
-                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"H264"))
-                    except Exception:
-                        pass
-                elif cap.isOpened():
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             else:
-                error_msg = (
-                    f'Invalid camera URL: "{camera_url}". Use a number (0, 1, 2...) for webcam, '
-                    f'RTSP/HTTP URL for IP camera, or a video filename like "demo.mp4" '
-                    f'saved in the "videos" folder.'
-                )
-                print(f"✗ {error_msg}")
-                try:
-                    self.socketio.emit(
-                        "error",
-                        {
-                            "camera_id": camera_id,
-                            "message": error_msg,
-                        },
-                    )
-                except Exception:
-                    pass
-                return
+                # RTSP/HTTP
+                cap = cv2.VideoCapture(camera_url)
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
-            # Give it a moment to initialize
-            time.sleep(0.5)
+            # Give it a moment to initialize - Use socketio.sleep for async compatibility
+            self.socketio.sleep(0.5)
             
             if not cap or not cap.isOpened():
-                if is_file_source:
-                    error_msg = f"Could not open video file. Check that it is a valid video: {camera_url}"
-                elif camera_url and camera_url.strip().isdigit():
-                    error_msg = f'Could not open webcam {camera_url}. Try a different index (0, 1, 2...) or check camera permissions.'
-                else:
-                    error_msg = f"Could not open video source: {camera_url}. Check if the URL is correct and accessible."
+                error_msg = f"Could not open video source: {camera_url}"
                 print(f"✗ {error_msg}")
-                try:
-                    self.socketio.emit('error', {
-                        'camera_id': camera_id,
-                        'message': error_msg
-                    })
-                except:
-                    pass
-                if cap:
-                    cap.release()
+                self.socketio.emit('error', {'camera_id': camera_id, 'message': error_msg})
                 return
             
-            print(f"✓ Streaming started for camera {camera_id} from {camera_url}")
+            print(f"✓ Streaming started for camera {camera_id}")
             
             consecutive_failures = 0
-            max_failures = 10
             
-            while camera_id in self.active_streams:
+            # Use the signal flag to control the loop
+            while self.stream_signals.get(camera_id, False):
                 ret, frame = cap.read()
+                
                 if not ret:
-                    # For video files, stop cleanly when we reach the end of the file
                     if is_file_source:
-                        print(f"✓ Video playback finished for camera {camera_id}")
-                        break
-
+                        # Restart video file loop
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        continue
+                    
                     consecutive_failures += 1
-                    if consecutive_failures >= max_failures:
-                        print(
-                            f"✗ Failed to read {max_failures} consecutive frames from camera {camera_id}"
-                        )
-                        try:
-                            self.socketio.emit(
-                                "error",
-                                {
-                                    "camera_id": camera_id,
-                                    "message": "Camera stopped responding. Check if camera is connected and accessible.",
-                                },
-                            )
-                        except Exception:
-                            pass
+                    if consecutive_failures >= 10:
+                        print(f"✗ Connection lost to camera {camera_id}")
+                        self.socketio.emit("error", {"camera_id": camera_id, "message": "Connection lost"})
                         break
-                    time.sleep(0.1)
+                    self.socketio.sleep(0.1)
                     continue
                 
-                consecutive_failures = 0  # Reset on successful read
+                consecutive_failures = 0
                 
+                # Resize large frames to improve performance
+                if frame.shape[1] > 800:
+                    scale = 800 / frame.shape[1]
+                    frame = cv2.resize(frame, None, fx=scale, fy=scale)
+
                 # Process frame with YOLO
                 if self.yolo_detector:
                     detections = self.yolo_detector.detect(frame)
                     density_info = self.density_detector.calculate_density(detections, frame.shape)
                     
-                    # Draw detections
+                    # Draw
                     frame = self.yolo_detector.draw_detections(frame, detections)
-                    
-                    # Draw density overlay
                     frame = self._draw_density_overlay(frame, density_info, threshold)
                     
-                    # Check threshold
-                    alert_triggered = self.density_detector.check_threshold(
-                        density_info['density_value'], 
-                        threshold
-                    )
+                    # Alert check
+                    alert_triggered = self.density_detector.check_threshold(density_info['density_value'], threshold)
                     
-                    # Log density data periodically
+                    # Log to DB
                     current_time = time.time()
                     if current_time - last_log_time >= log_interval:
-                        DensityLog.create(
-                            camera_id,
-                            density_info['person_count'],
-                            density_info['density_value'],
-                            alert_triggered
-                        )
+                        DensityLog.create(camera_id, density_info['person_count'], density_info['density_value'], alert_triggered)
                         last_log_time = current_time
                     
-                    # Encode frame to base64
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    # Encode
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     frame_base64 = base64.b64encode(buffer).decode('utf-8')
                     
-                    # Emit frame and data
-                    try:
-                        self.socketio.emit('frame', {
-                            'camera_id': camera_id,
-                            'frame': frame_base64,
-                            'density': density_info,
-                            'alert': alert_triggered
-                        })
-                    except Exception as emit_error:
-                        print(f"✗ Error emitting frame: {emit_error}")
-                        break
-                else:
-                    # No YOLO model, send frame without processing
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
-                    
-                    try:
-                        self.socketio.emit('frame', {
-                            'camera_id': camera_id,
-                            'frame': frame_base64,
-                            'density': {'person_count': 0, 'density_value': 0.0, 'density_per_sqm': 0.0},
-                            'alert': False
-                        })
-                    except Exception as emit_error:
-                        print(f"✗ Error emitting frame: {emit_error}")
-                        break
+                    # Emit
+                    self.socketio.emit('frame', {
+                        'camera_id': camera_id,
+                        'frame': frame_base64,
+                        'density': density_info,
+                        'alert': alert_triggered
+                    })
                 
-                frame_count += 1
-                # Limit frame rate to ~10 FPS to reduce CPU load
-                time.sleep(0.1)
+                # Limit FPS to ~10-15 to save CPU and Network
+                # Use socketio.sleep instead of time.sleep
+                self.socketio.sleep(0.08)
         
         except Exception as e:
-            print(f"Error in stream worker for camera {camera_id}: {e}")
-            self.socketio.emit('error', {
-                'camera_id': camera_id,
-                'message': str(e)
-            })
+            print(f"Error in stream worker: {e}")
+            self.socketio.emit('error', {'camera_id': camera_id, 'message': str(e)})
         
         finally:
             if cap:
                 cap.release()
-            if camera_id in self.active_streams:
-                del self.active_streams[camera_id]
+            # Clean up signal if it exists
+            if camera_id in self.stream_signals:
+                del self.stream_signals[camera_id]
             print(f"Stream worker stopped for camera {camera_id}")
     
     def _draw_density_overlay(self, frame, density_info, threshold):
         """Draw density information overlay on frame"""
-        import cv2
-        import numpy as np
-        
         # Create overlay
         overlay = frame.copy()
         
         # Background for text
-        cv2.rectangle(overlay, (10, 10), (350, 120), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        cv2.rectangle(overlay, (10, 10), (300, 100), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
         
         # Text color based on alert status
         alert_triggered = density_info['density_value'] >= threshold
         text_color = (0, 0, 255) if alert_triggered else (0, 255, 0)
         
-        # Draw text
         cv2.putText(frame, f"People: {density_info['person_count']}", 
-                   (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                   (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(frame, f"Density: {density_info['density_value']:.2f}", 
-                   (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
-        cv2.putText(frame, f"Per sqm: {density_info['density_per_sqm']:.2f}", 
-                   (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                   (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, text_color, 2)
         
         if alert_triggered:
             cv2.putText(frame, "ALERT: OVERCROWDING!", 
-                       (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                       (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         return frame
-
